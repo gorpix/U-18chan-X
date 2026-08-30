@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         U-18Chan Viewport Fit + OP Comments
 // @namespace    local.codex.u18chan
-// @version      1.0
+// @version      1.1
 // @description  Cleans U-18Chan, fits images, adds index/thread tools, inline quotes, backlinks, and E-Hentai matching.
 // @match        https://u18chan.com/*
 // @match        https://www.u18chan.com/*
@@ -1030,6 +1030,13 @@
     }
   }
 
+  function installTabTitle() {
+    const boardId = location.pathname.split('/').filter(Boolean)[0];
+    const boardLabel = boardId && boardId.toLowerCase() !== 'topic' ? `/${boardId}/` : 'U-18Chan';
+    const subject = (document.querySelector('#FirstPost .Subject')?.textContent || '').replace(/\s+/g, ' ').trim();
+    document.title = subject ? `${boardLabel} — ${subject}` : boardLabel;
+  }
+
   function installSiteCleanup() {
     for (const notice of document.querySelectorAll('body > center')) {
       const text = (notice.textContent || '').replace(/\s+/g, ' ').trim();
@@ -1061,6 +1068,7 @@
   }
 
   function start() {
+    installTabTitle();
     installSiteCleanup();
     installThreadEhButton();
     installQuoteEnhancements();

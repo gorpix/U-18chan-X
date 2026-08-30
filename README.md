@@ -1,6 +1,6 @@
 # U-18chan-X
 
-Userscript v1.0 for improving U-18Chan's catalog and thread views.
+Userscript v1.1 for improving U-18Chan's catalog and thread views.
 
 ## Added
 
@@ -9,6 +9,7 @@ Userscript v1.0 for improving U-18Chan's catalog and thread views.
 - Optional infinite scrolling through older catalog pages.
 - User-triggered E-Hentai matching with page counts on cards and threads.
 - Inline previews for quotes and backlinks, with wheel-click jump navigation.
+- Descriptive tab titles using the board name or thread subject.
 - Compact fixed site header.
 - Shift-click to view an expanded image at its original dimensions.
 
