@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "U-18Chan Expanded Image Viewport Fit",
+  "version": "1.0",
+  "description": "Cleans U-18Chan, fits images, adds index/thread tools, inline quotes, backlinks, and E-Hentai matching.",
+  "host_permissions": [
+    "https://e-hentai.org/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://u18chan.com/*",
+        "https://www.u18chan.com/*"
+      ],
+      "css": ["fit.css"],
+      "js": ["fit.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
