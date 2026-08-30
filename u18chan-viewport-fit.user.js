@@ -939,6 +939,65 @@
       });
     }
 
+    const jumpToPost = (post, event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const hash = `#${post.container.id}`;
+      history.pushState(null, '', hash);
+      post.container.scrollIntoView({ block: 'start' });
+    };
+
+    const toggleInlinePreview = (owner, referenced) => {
+      const existing = owner.message.querySelector(`.u18vf-inline-quote[data-target="${referenced.id}"]`);
+      if (existing) {
+        existing.remove();
+        return;
+      }
+
+      const preview = document.createElement('span');
+      preview.className = 'u18vf-inline-quote';
+      preview.dataset.target = referenced.id;
+      const header = document.createElement('span');
+      header.className = 'u18vf-inline-quote-header';
+      header.textContent = `${(referenced.userDetails?.textContent || '').replace(/\s+/g, ' ').trim()} `;
+      const jump = document.createElement('a');
+      jump.href = `#${referenced.container.id}`;
+      jump.textContent = `>>${referenced.id}`;
+      header.appendChild(jump);
+      preview.appendChild(header);
+
+      const thumbnail = referenced.container.querySelector(`img[id="post_${referenced.id}_image"]`);
+      const sourceUrl = thumbnail?.getAttribute('data-original') || thumbnail?.getAttribute('src');
+      if (sourceUrl) {
+        const image = document.createElement('img');
+        image.className = 'u18vf-inline-quote-thumb';
+        image.src = sourceUrl;
+        image.alt = '';
+        preview.appendChild(image);
+      }
+
+      const body = document.createElement('span');
+      body.className = 'u18vf-inline-quote-body';
+      const messageCopy = referenced.message.cloneNode(true);
+      messageCopy.querySelectorAll('.u18vf-inline-quote').forEach((inline) => inline.remove());
+      body.textContent = messageText(messageCopy);
+      preview.appendChild(body);
+      owner.message.appendChild(preview);
+    };
+
+    const bindInlineLink = (link, owner, referenced) => {
+      link.classList.add('u18vf-inline-quote-link');
+      link.addEventListener('click', (event) => {
+        if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        toggleInlinePreview(owner, referenced);
+      });
+      link.addEventListener('auxclick', (event) => {
+        if (event.button !== 1) return;
+        jumpToPost(referenced, event);
+      });
+    };
+
     const backlinks = new Map();
     for (const source of posts.values()) {
       for (const quote of source.message.querySelectorAll('a.PostLink[href]')) {
@@ -948,47 +1007,7 @@
         const sources = backlinks.get(target.id) || new Set();
         sources.add(source.id);
         backlinks.set(target.id, sources);
-
-        quote.classList.add('u18vf-inline-quote-link');
-        quote.addEventListener('click', (event) => {
-          if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-          event.preventDefault();
-          const existing = source.message.querySelector(`.u18vf-inline-quote[data-target="${target.id}"]`);
-          if (existing) {
-            existing.remove();
-            return;
-          }
-
-          const preview = document.createElement('span');
-          preview.className = 'u18vf-inline-quote';
-          preview.dataset.target = target.id;
-          const header = document.createElement('span');
-          header.className = 'u18vf-inline-quote-header';
-          header.textContent = `${(target.userDetails?.textContent || '').replace(/\s+/g, ' ').trim()} `;
-          const jump = document.createElement('a');
-          jump.href = `#${target.container.id}`;
-          jump.textContent = `>>${target.id}`;
-          header.appendChild(jump);
-          preview.appendChild(header);
-
-          const thumbnail = target.container.querySelector(`img[id="post_${target.id}_image"]`);
-          const sourceUrl = thumbnail?.getAttribute('data-original') || thumbnail?.getAttribute('src');
-          if (sourceUrl) {
-            const image = document.createElement('img');
-            image.className = 'u18vf-inline-quote-thumb';
-            image.src = sourceUrl;
-            image.alt = '';
-            preview.appendChild(image);
-          }
-
-          const body = document.createElement('span');
-          body.className = 'u18vf-inline-quote-body';
-          const messageCopy = target.message.cloneNode(true);
-          messageCopy.querySelectorAll('.u18vf-inline-quote').forEach((inline) => inline.remove());
-          body.textContent = messageText(messageCopy);
-          preview.appendChild(body);
-          source.message.appendChild(preview);
-        });
+        bindInlineLink(quote, source, target);
       }
     }
 
@@ -1004,6 +1023,7 @@
         const link = document.createElement('a');
         link.href = `#${source.container.id}`;
         link.textContent = `>>${sourceId}`;
+        bindInlineLink(link, target, source);
         holder.appendChild(link);
       }
       target.userDetails.appendChild(holder);
