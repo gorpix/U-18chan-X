@@ -25,4 +25,3 @@ Userscript v1.0 for improving U-18Chan's catalog and thread views.
 1. Install Tampermonkey, Violentmonkey, or Greasemonkey.
 2. Open the [userscript](https://raw.githubusercontent.com/gorpix/U-18chan-X/main/u18chan-viewport-fit.user.js).
 3. Confirm installation in your userscript manager, then reload U-18Chan.
-
