@@ -1034,7 +1034,17 @@
     const boardId = location.pathname.split('/').filter(Boolean)[0];
     const boardLabel = boardId && boardId.toLowerCase() !== 'topic' ? `/${boardId}/` : 'U-18Chan';
     const subject = (document.querySelector('#FirstPost .Subject')?.textContent || '').replace(/\s+/g, ' ').trim();
-    document.title = subject ? `${boardLabel} — ${subject}` : boardLabel;
+    if (/\/topic\/\d+/i.test(location.pathname) && subject) {
+      document.title = `${boardLabel} - ${subject}`;
+      return;
+    }
+
+    let boardTitle = (document.querySelector('.Title')?.textContent || '').replace(/\s+/g, ' ').trim();
+    if (boardId) {
+      const escapedBoard = boardId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      boardTitle = boardTitle.replace(new RegExp(`^/${escapedBoard}/\\s*[-–—:]\\s*`, 'i'), '');
+    }
+    document.title = boardTitle ? `${boardLabel} - ${boardTitle} - U-18Chan` : `${boardLabel} - U-18Chan`;
   }
 
   function installSiteCleanup() {
