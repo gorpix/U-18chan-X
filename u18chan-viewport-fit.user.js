@@ -1,8 +1,11 @@
 // ==UserScript==
 // @name         U-18Chan Viewport Fit + OP Comments
 // @namespace    local.codex.u18chan
-// @version      1.1
+// @version      1.2
 // @description  Cleans U-18Chan, fits images, adds index/thread tools, inline quotes, backlinks, and E-Hentai matching.
+// @homepageURL  https://github.com/gorpix/U-18chan-X
+// @updateURL    https://raw.githubusercontent.com/gorpix/U-18chan-X/main/u18chan-viewport-fit.user.js
+// @downloadURL  https://raw.githubusercontent.com/gorpix/U-18chan-X/main/u18chan-viewport-fit.user.js
 // @match        https://u18chan.com/*
 // @match        https://www.u18chan.com/*
 // @run-at       document-start
@@ -26,9 +29,28 @@
       object-position: top left !important;
     }
 
+    img.ThumbnailImage[is-expanded][data-u18vf-original],
+    img.ThumbnailImageReply[is-expanded][data-u18vf-original] {
+      max-width: none !important;
+      max-height: none !important;
+    }
+
     .ad_banner,
     .ad_banner2 {
       display: none !important;
+    }
+
+    /* Hidden but still rendered, so the ad iframe keeps loading (display:none can stop it). Also covers anything
+       the ad script inserts next to the slot, in the header (index pages) or in <body> before the nav (threads). */
+    #ad-header-slot,
+    #ad-header-slot ~ :has(~ .BoardList),
+    .u18vf-site-header > :not(.BoardList, .Title, .Description) {
+      position: fixed !important;
+      top: 0 !important;
+      left: -10000px !important;
+      width: 728px !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
     }
 
     body.u18vf-site-clean {
@@ -78,8 +100,6 @@
       padding: 6px 8px;
       overflow-y: auto;
       color: #fff !important;
-      background: rgba(0, 0, 0, 0.58);
-      border-radius: 4px;
       text-align: left;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
@@ -219,6 +239,9 @@
       margin: 0 !important;
       padding: 4px !important;
       overflow: hidden;
+      /* One black box behind the title, thumbnail and comment. */
+      background: rgba(0, 0, 0, 0.58);
+      border-radius: 4px;
     }
 
     #gallery_body.u18vf-comments-enabled .Subject {
@@ -248,6 +271,7 @@
       height: auto !important;
       max-width: 100% !important;
       max-height: var(--u18vf-thumb-height) !important;
+      margin: 0 !important; /* the site's 10px bottom margin shifts the centered image up into the title */
       object-fit: contain !important;
     }
 
@@ -370,6 +394,9 @@
           };
           writeSessionCache(topicId, data);
           return data;
+        } catch (error) {
+          cache.delete(url); // don't cache failures, so the card can retry later
+          throw error;
         } finally {
           clearTimeout(timeout);
         }
@@ -387,7 +414,8 @@
     if (!output) {
       output = document.createElement('div');
       output.className = 'u18vf-op-comment';
-      subject.insertAdjacentElement('afterend', output);
+      // Place it below the thumbnail (Subject, then .layoutHeight), falling back to under the subject.
+      (item.querySelector('.layoutHeight') || subject).insertAdjacentElement('afterend', output);
     }
     let counts = output.querySelector('.u18vf-counts');
     if (!counts) {
@@ -423,10 +451,7 @@
 
   function titleData(subject, comment = '') {
     const artists = [];
-    subject.replace(/\[([^\]]{2,60})\]/g, (_match, artist) => {
-      artists.push(artist.trim());
-      return _match;
-    });
+    for (const match of subject.matchAll(/\[([^\]]{2,60})\]/g)) artists.push(match[1].trim());
     for (const line of `${subject}\n${comment}`.split(/\r?\n/)) {
       const match = line.match(/(?:^|\s)by\s+([^,;|()[\]]{2,60})\s*$/i);
       if (match) artists.push(match[1].trim());
@@ -857,6 +882,8 @@
     let enabled = readInfiniteEnabled();
     let loading = false;
     let reachedEnd = false;
+    let failures = 0;
+    let retryAfter = 0;
     let nextPageUrl = findNextPageUrl(document, location.href);
     const visitedPages = new Set([new URL(location.href).href]);
 
@@ -874,7 +901,7 @@
     const nearBottom = () => window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 600;
 
     const maybeLoadNextPage = async () => {
-      if (!enabled || loading || reachedEnd || !nearBottom()) return;
+      if (!enabled || loading || reachedEnd || Date.now() < retryAfter || !nearBottom()) return;
       if (!nextPageUrl || visitedPages.has(nextPageUrl)) {
         reachedEnd = true;
         updateButton();
@@ -898,14 +925,19 @@
         const added = appendIndexPage(page, pageUrl, gallery, cardObserver);
         nextPageUrl = findNextPageUrl(page, pageUrl);
         reachedEnd = added === 0 || !nextPageUrl;
+        failures = 0;
       } catch (error) {
+        // Back off exponentially (2s, 4s, ... capped at 30s) instead of retrying on every scroll event.
+        failures += 1;
+        retryAfter = Date.now() + Math.min(30000, 1000 * 2 ** failures);
         console.debug('[U18 Viewport Fit] Could not load next index page:', error);
       } finally {
         clearTimeout(timeout);
         loading = false;
         updateButton();
       }
-
+      // A short page can leave us near the bottom with no further scroll event to trigger the next load.
+      if (!failures) setTimeout(maybeLoadNextPage, 300);
     };
 
     button.addEventListener('click', () => {
@@ -1059,6 +1091,41 @@
       }
     }
 
+    // The <br>s above the ad slot only exist to make room for it. On thread pages the slot sits directly in <body>,
+    // so the header handling below bails out and they would leave a gap above the nav bar. (<meta>s are kept.)
+    const adSlot = document.getElementById('ad-header-slot');
+    for (let prev = adSlot?.previousElementSibling; prev?.matches('br, meta');) {
+      const next = prev.previousElementSibling;
+      if (prev.matches('br')) prev.remove();
+      prev = next;
+    }
+    if (adSlot) {
+      // Inline !important styles from the ad script would beat the stylesheet, so pin ours inline and re-apply them
+      // whenever the slot's style attribute changes.
+      const stashed = { position: 'fixed', top: '0', left: '-10000px', width: '728px', opacity: '0', 'pointer-events': 'none' };
+      const stash = () => {
+        for (const [property, value] of Object.entries(stashed)) {
+          if (adSlot.style.getPropertyValue(property) !== value || adSlot.style.getPropertyPriority(property) !== 'important') {
+            adSlot.style.setProperty(property, value, 'important');
+          }
+        }
+      };
+      stash();
+      new MutationObserver(stash).observe(adSlot, { attributes: true, attributeFilter: ['style'] });
+    }
+
+    // "Page generated in ..." line, the stray number printed beside it, and the empty spacer paragraphs that
+    // used to make room for the header ad and push everything down.
+    for (const span of document.querySelectorAll('body > div > span')) {
+      if (/^Page generated in/i.test((span.textContent || '').trim())) span.parentElement.remove();
+    }
+    for (const node of Array.from(document.body.childNodes)) {
+      if (node.nodeType === Node.TEXT_NODE && /^\s*\d+\s*$/.test(node.textContent || '')) node.remove();
+    }
+    for (const spacer of document.querySelectorAll('body > p[style*="padding-top"]')) {
+      if (!spacer.textContent.trim() && !spacer.children.length) spacer.remove();
+    }
+
     const boardList = document.querySelector('.BoardList');
     const header = boardList?.parentElement;
     if (!header || header === document.body || !header.querySelector('.Title')) return;
@@ -1077,7 +1144,31 @@
     }
   }
 
+  function installOriginalSizeToggle() {
+    // Shift-click toggles original (unfitted) size. On an expanded image we swallow the click so the site doesn't
+    // collapse it; on a collapsed thumbnail we let the site's handler expand it, then mark it unfitted.
+    document.addEventListener('click', (event) => {
+      if (event.button !== 0) return;
+      const image = event.target instanceof Element
+        ? event.target.closest('img.ThumbnailImage, img.ThumbnailImageReply')
+        : null;
+      if (!image) return;
+      if (!event.shiftKey) {
+        image.removeAttribute('data-u18vf-original'); // plain click: next expansion fits the viewport again
+        return;
+      }
+      event.preventDefault(); // stop shift+click on the wrapping link from opening a new window
+      if (image.hasAttribute('is-expanded')) {
+        event.stopImmediatePropagation();
+        image.toggleAttribute('data-u18vf-original');
+      } else {
+        image.setAttribute('data-u18vf-original', '');
+      }
+    }, true);
+  }
+
   function start() {
+    installOriginalSizeToggle();
     installTabTitle();
     installSiteCleanup();
     installThreadEhButton();

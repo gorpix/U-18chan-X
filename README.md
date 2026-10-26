@@ -1,6 +1,6 @@
 # U-18chan-X
 
-Userscript v1.1 for improving U-18Chan's catalog and thread views.
+Userscript v1.2 for improving U-18Chan's catalog and thread views.
 
 ## Added
 
@@ -20,6 +20,14 @@ Userscript v1.1 for improving U-18Chan's catalog and thread views.
 - Catalog content no longer overlaps the header or responsibility notice.
 - E-Hentai page counts no longer include digits from timestamps.
 - Banner ads are hidden while their image elements remain available to load.
+
+## v1.2
+
+- Shift-click a thumbnail (collapsed or expanded) to view it at original size.
+- Catalog cards are a single box with the comment under the thumbnail; fixed titles overlapping thumbnails.
+- Header ad hidden (still loads) without leaving empty space; removed "Page generated in…" line.
+- Failed catalog loads retry; infinite scroll backs off on errors and keeps loading short pages.
+- Added auto-update URLs.
 
 ## Installation
 
