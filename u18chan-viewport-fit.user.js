@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         U-18Chan Viewport Fit + OP Comments
 // @namespace    local.codex.u18chan
-// @version      1.2
+// @version      1.3
 // @description  Cleans U-18Chan, fits images, adds index/thread tools, inline quotes, backlinks, and E-Hentai matching.
 // @homepageURL  https://github.com/gorpix/U-18chan-X
 // @updateURL    https://raw.githubusercontent.com/gorpix/U-18chan-X/main/u18chan-viewport-fit.user.js
@@ -163,7 +163,7 @@
     }
 
     .u18vf-inline-quote-link {
-      cursor: zoom-in;
+      cursor: pointer;
     }
 
     .u18vf-inline-quote {
@@ -195,7 +195,25 @@
 
     .u18vf-inline-quote-body {
       display: block;
-      white-space: pre-wrap;
+    }
+
+    .u18vf-hover-preview {
+      position: fixed;
+      z-index: 2147483646;
+      max-width: min(600px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px);
+      margin: 0;
+      overflow: hidden;
+      border: 1px solid #666;
+      background: rgba(20, 20, 20, 0.97);
+      box-shadow: 0 3px 12px rgba(0, 0, 0, 0.6);
+      pointer-events: none;
+    }
+
+    /* Subtly lighten the post's own background: an inset shadow tints whatever colour the theme uses and is drawn
+       beneath the content, so text and images are unaffected. */
+    .u18vf-quote-target {
+      box-shadow: inset 0 0 0 100vmax rgba(255, 255, 255, 0.07) !important;
     }
 
     .u18vf-inline-quote-thumb {
@@ -432,10 +450,20 @@
     return { output, counts, countText };
   }
 
+  // Board id from either URL form: /gc/topic/123 or /board/u18chan/gc/topic/123.
+  function currentBoard() {
+    const parts = location.pathname.split('/').filter(Boolean).map((part) => part.toLowerCase());
+    const topicAt = parts.indexOf('topic');
+    if (topicAt > 0) return parts[topicAt - 1];
+    if (parts[0] === 'board') return parts[2] || null;
+    return parts[0] || null;
+  }
+
   function ehFurryFilter() {
-    const board = location.pathname.split('/').filter(Boolean)[0]?.toLowerCase();
-    if (['igc', 'gc', 'igfur', 'gfur'].includes(board)) return 'm:furry$';
-    if (['ic', 'c', 'ifur', 'fur'].includes(board)) return 'f:furry$';
+    const board = currentBoard();
+    // Comics boards only (and their indexes): /gc/ is gay comics, /c/ is straight comics.
+    if (['igc', 'gc'].includes(board)) return 'm:furry$';
+    if (['ic', 'c'].includes(board)) return 'f:furry$';
     return null;
   }
 
@@ -955,6 +983,7 @@
   function installQuoteEnhancements() {
     if (!/\/topic\/\d+/i.test(location.pathname)) return;
     const posts = new Map();
+    const postsByContainer = new Map();
 
     for (const message of document.querySelectorAll('span[id^="post_"][id$="_message_div"]')) {
       const match = message.id.match(/^post_(\d+)_message_div$/);
@@ -963,13 +992,23 @@
       const container = document.getElementById(`replybox_${id}`) || message.closest('#FirstPost');
       if (!container) continue;
       if (!container.id) container.id = `u18vf-post-${id}`;
-      posts.set(id, {
+      const post = {
         id,
         message,
         container,
         userDetails: container.querySelector('.UserDetails')
-      });
+      };
+      posts.set(id, post);
+      postsByContainer.set(container, post);
     }
+
+    // A quote (>>123 in a message) or one of our backlinks, pointing at a post on this page.
+    const quoteTarget = (link) => {
+      if (!(link instanceof Element) || !link.matches('a.PostLink, .u18vf-backlinks a')) return null;
+      const match = (link.textContent || '').trim().match(/^>>(\d+)$/);
+      return match ? posts.get(match[1]) || null : null;
+    };
+    const linkFromEvent = (event) => (event.target instanceof Element ? event.target.closest('a') : null);
 
     const jumpToPost = (post, event) => {
       event.preventDefault();
@@ -979,27 +1018,35 @@
       post.container.scrollIntoView({ block: 'start' });
     };
 
-    const toggleInlinePreview = (owner, referenced) => {
-      const existing = owner.message.querySelector(`.u18vf-inline-quote[data-target="${referenced.id}"]`);
-      if (existing) {
-        existing.remove();
-        return;
-      }
+    const detailsText = (post) => {
+      if (!post.userDetails) return '';
+      const copy = post.userDetails.cloneNode(true);
+      copy.querySelectorAll('.u18vf-backlinks').forEach((node) => node.remove());
+      return (copy.textContent || '').replace(/\s+/g, ' ').trim();
+    };
 
+    // Builds a preview of a post from its live markup, so the quotes and backlinks inside it stay clickable and
+    // previews can nest. Used both inline (click) and as the hover bubble.
+    const buildPreview = (referenced) => {
       const preview = document.createElement('span');
       preview.className = 'u18vf-inline-quote';
       preview.dataset.target = referenced.id;
+
       const header = document.createElement('span');
       header.className = 'u18vf-inline-quote-header';
-      header.textContent = `${(referenced.userDetails?.textContent || '').replace(/\s+/g, ' ').trim()} `;
+      header.textContent = `${detailsText(referenced)} `;
       const jump = document.createElement('a');
       jump.href = `#${referenced.container.id}`;
-      jump.textContent = `>>${referenced.id}`;
+      jump.textContent = `#${referenced.id}`;
       header.appendChild(jump);
+      const backlinks = referenced.userDetails?.querySelector('.u18vf-backlinks');
+      if (backlinks) header.appendChild(backlinks.cloneNode(true));
       preview.appendChild(header);
 
       const thumbnail = referenced.container.querySelector(`img[id="post_${referenced.id}_image"]`);
-      const sourceUrl = thumbnail?.getAttribute('data-original') || thumbnail?.getAttribute('src');
+      const sourceUrl = thumbnail?.getAttribute('data-collapsed-original')
+        || thumbnail?.getAttribute('data-original')
+        || thumbnail?.getAttribute('src');
       if (sourceUrl) {
         const image = document.createElement('img');
         image.className = 'u18vf-inline-quote-thumb';
@@ -1012,34 +1059,131 @@
       body.className = 'u18vf-inline-quote-body';
       const messageCopy = referenced.message.cloneNode(true);
       messageCopy.querySelectorAll('.u18vf-inline-quote').forEach((inline) => inline.remove());
-      body.textContent = messageText(messageCopy);
+      messageCopy.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+      body.append(...messageCopy.childNodes);
       preview.appendChild(body);
-      owner.message.appendChild(preview);
+      return preview;
     };
 
-    const bindInlineLink = (link, owner, referenced) => {
-      link.classList.add('u18vf-inline-quote-link');
-      link.addEventListener('click', (event) => {
-        if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-        event.preventDefault();
-        toggleInlinePreview(owner, referenced);
-      });
-      link.addEventListener('auxclick', (event) => {
-        if (event.button !== 1) return;
-        jumpToPost(referenced, event);
-      });
+    // Where a clicked link's preview goes: inside the preview it was clicked in, otherwise under its post's message.
+    const previewOwner = (link) => {
+      const parentPreview = link.closest('.u18vf-inline-quote');
+      if (parentPreview) return parentPreview.querySelector(':scope > .u18vf-inline-quote-body');
+      const container = link.closest('[id^="replybox_"], #FirstPost');
+      return postsByContainer.get(container)?.message || null;
     };
+
+    const togglePreview = (owner, referenced) => {
+      const existing = Array.from(owner.children)
+        .find((child) => child.matches('.u18vf-inline-quote') && child.dataset.target === referenced.id);
+      if (existing) {
+        existing.remove();
+        return;
+      }
+      owner.appendChild(buildPreview(referenced));
+    };
+
+    // Hover: highlight the referenced post when it's on screen, otherwise show it in a bubble next to the pointer.
+    let hovered = null;
+    let pointer = { x: 0, y: 0 };
+
+    const hideHover = () => {
+      if (!hovered) return;
+      hovered.target.container.classList.remove('u18vf-quote-target');
+      hovered.bubble?.remove();
+      hovered = null;
+    };
+
+    // The fixed nav/header covers the top of the viewport; a post hidden under it isn't really on screen.
+    const coveredTop = () => Math.max(0, ...['.u18vf-site-header', '.BoardList'].map((selector) => {
+      const element = document.querySelector(selector);
+      return element && getComputedStyle(element).position === 'fixed' ? element.getBoundingClientRect().bottom : 0;
+    }));
+
+    const onScreen = (element) => {
+      const rect = element.getBoundingClientRect();
+      const visible = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, coveredTop());
+      return visible >= Math.min(rect.height, 120);
+    };
+
+    const positionBubble = (bubble) => {
+      const gap = 12;
+      const offset = 16;
+      const { width, height } = bubble.getBoundingClientRect();
+      let left = pointer.x + offset;
+      if (left + width > window.innerWidth - gap) left = Math.max(gap, pointer.x - offset - width);
+      let top = pointer.y + offset;
+      if (top + height > window.innerHeight - gap) top = Math.max(gap, window.innerHeight - gap - height);
+      bubble.style.left = `${left}px`;
+      bubble.style.top = `${top}px`;
+    };
+
+    document.addEventListener('mouseover', (event) => {
+      const link = linkFromEvent(event);
+      const referenced = quoteTarget(link);
+      if (!referenced) return;
+      // Capture phase on document runs before the site's delegated jQuery handler; stopping here keeps its bubble away.
+      event.stopPropagation();
+      pointer = { x: event.clientX, y: event.clientY };
+      if (hovered?.link === link) return;
+      hideHover();
+      hovered = { link, target: referenced, bubble: null };
+      if (onScreen(referenced.container)) {
+        referenced.container.classList.add('u18vf-quote-target');
+        return;
+      }
+      const bubble = buildPreview(referenced);
+      bubble.classList.add('u18vf-hover-preview');
+      document.body.appendChild(bubble);
+      positionBubble(bubble);
+      bubble.querySelector('img')?.addEventListener('load', () => {
+        if (hovered?.bubble === bubble) positionBubble(bubble);
+      });
+      hovered.bubble = bubble;
+    }, true);
+
+    document.addEventListener('mousemove', (event) => {
+      if (!hovered?.bubble) return;
+      pointer = { x: event.clientX, y: event.clientY };
+      positionBubble(hovered.bubble);
+    }, { capture: true, passive: true });
+
+    document.addEventListener('mouseout', (event) => {
+      if (!hovered) return;
+      const link = linkFromEvent(event);
+      if (link !== hovered.link || link.contains(event.relatedTarget)) return;
+      event.stopPropagation();
+      hideHover();
+    }, true);
+
+    window.addEventListener('scroll', hideHover, { passive: true });
+
+    // Delegated so links inside previews (at any depth) work too.
+    document.addEventListener('click', (event) => {
+      const link = linkFromEvent(event);
+      const referenced = quoteTarget(link);
+      if (!referenced) return;
+      if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      hideHover();
+      const owner = previewOwner(link);
+      if (owner) togglePreview(owner, referenced);
+    });
+
+    document.addEventListener('auxclick', (event) => {
+      if (event.button !== 1) return;
+      const referenced = quoteTarget(linkFromEvent(event));
+      if (referenced) jumpToPost(referenced, event);
+    });
 
     const backlinks = new Map();
     for (const source of posts.values()) {
-      for (const quote of source.message.querySelectorAll('a.PostLink[href]')) {
-        const match = (quote.textContent || '').trim().match(/^>>(\d+)$/);
-        const target = match ? posts.get(match[1]) : null;
+      for (const quote of source.message.querySelectorAll('a.PostLink')) {
+        const target = quoteTarget(quote);
         if (!target) continue;
-        const sources = backlinks.get(target.id) || new Set();
-        sources.add(source.id);
-        backlinks.set(target.id, sources);
-        bindInlineLink(quote, source, target);
+        quote.classList.add('u18vf-inline-quote-link');
+        if (!backlinks.has(target.id)) backlinks.set(target.id, new Set());
+        backlinks.get(target.id).add(source.id);
       }
     }
 
@@ -1053,9 +1197,9 @@
         const source = posts.get(sourceId);
         if (!source) continue;
         const link = document.createElement('a');
+        link.className = 'u18vf-inline-quote-link';
         link.href = `#${source.container.id}`;
         link.textContent = `>>${sourceId}`;
-        bindInlineLink(link, target, source);
         holder.appendChild(link);
       }
       target.userDetails.appendChild(holder);
@@ -1063,8 +1207,8 @@
   }
 
   function installTabTitle() {
-    const boardId = location.pathname.split('/').filter(Boolean)[0];
-    const boardLabel = boardId && boardId.toLowerCase() !== 'topic' ? `/${boardId}/` : 'U-18Chan';
+    const boardId = currentBoard();
+    const boardLabel = boardId && boardId !== 'topic' ? `/${boardId}/` : 'U-18Chan';
     const subject = (document.querySelector('#FirstPost .Subject')?.textContent || '').replace(/\s+/g, ' ').trim();
     if (/\/topic\/\d+/i.test(location.pathname) && subject) {
       document.title = `${boardLabel} - ${subject}`;
